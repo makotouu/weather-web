@@ -716,7 +716,10 @@
       }
 
       /* ---------- fetch & merge 4 models ---------- */
-      function fetchModel(m, lat, lon){
+      function fetchModel(m, lat, lon, opts){
+        opts = opts || {};
+        var timeoutMs = opts.timeoutMs || 6000;
+        var maxRetry = (opts.maxRetry !== undefined ? opts.maxRetry : 1);
         var params = "latitude="+lat+"&longitude="+lon+
           "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m,is_day"+
           "&hourly=temperature_2m,weather_code,precipitation_probability,pressure_msl"+
@@ -725,7 +728,7 @@
         var url = "https://api.open-meteo.com/v1/forecast?"+params;
         function tryOnce(n){
           var ctrl = new AbortController();
-          var timer = setTimeout(function(){ ctrl.abort(); }, 20000);
+          var timer = setTimeout(function(){ ctrl.abort(); }, timeoutMs);
           return fetch(url, { signal: ctrl.signal, cache:"no-store" })
             .then(function(res){
               clearTimeout(timer);
@@ -735,10 +738,10 @@
             .then(function(json){ return { ok:true, model:m, json:json }; })
             .catch(function(err){
               clearTimeout(timer);
-              var msg = (err && err.name === "AbortError") ? "タイムアウト（20秒）" : String(err && err.message || err);
-              // 一時的な通信エラー（VPNや回線の瞬断など）で全滅しないよう、間隔を空けて最大3回まで試す
-              if (n < 2){
-                return new Promise(function(res){ setTimeout(res, 1600 * (n+1)); }).then(function(){ return tryOnce(n+1); });
+              var msg = (err && err.name === "AbortError") ? "タイムアウト（6秒）" : String(err && err.message || err);
+              // 初回表示を遅らせないため再試行は最大1回・短い間隔だけにする
+              if (n < maxRetry){
+                return new Promise(function(res){ setTimeout(res, 700 * (n+1)); }).then(function(){ return tryOnce(n+1); });
               }
               return { ok:false, model:m, error:msg };
             });
@@ -813,7 +816,7 @@
             .catch(function(err){
               clearTimeout(timer);
               if (n < 1){
-                return new Promise(function(r){ setTimeout(r, 1200); }).then(function(){ return once(n+1); });
+                return new Promise(function(r){ setTimeout(r, 600); }).then(function(){ return once(n+1); });
               }
               throw err;
             });
@@ -864,7 +867,7 @@
       }
       function fetchWttr(lat, lon){
         var url = "https://wttr.in/" + lat.toFixed(4) + "," + lon.toFixed(4) + "?format=j1";
-        return fetchJson(url, 15000).then(function(j){
+        return fetchJson(url, 8000).then(function(j){
           var cc = j.current_condition && j.current_condition[0];
           var daysArr = j.weather || [];
           if (!cc || !daysArr.length) throw new Error("データ形式が不正です");
@@ -920,7 +923,7 @@
       }
       function fetchMet(lat, lon){
         var url = "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=" + lat.toFixed(4) + "&lon=" + lon.toFixed(4);
-        return fetchJson(url, 15000).then(function(j){
+        return fetchJson(url, 8000).then(function(j){
           var ts = j.properties && j.properties.timeseries;
           if (!ts || !ts.length) throw new Error("データ形式が不正です");
           var tp = tokyoParts(new Date());
@@ -966,49 +969,66 @@
         });
       }
 
-      function finishLoad(place, data){
+      var loadSeq = 0;
+      var FALLBACK_AFTER_MS = 10000;
+      function applyData(place, data){
         state.data = data;
+        $("loading").classList.remove("show");
+        $("error").classList.remove("show");
+        render(place, data);
+      }
+      function finishLoad(place, data){
         state.loading = false;
         $("refresh").classList.remove("spinning");
         $("loading").classList.remove("show");
-        render(place, data);
+        applyData(place, data);
       }
       function load(place, attempt){
-        if (state.loading) return;
+        var seq = ++loadSeq;
         state.loading = true;
+        state.place = place;
         $("refresh").classList.add("spinning");
+        // 前の表示がある間は消さず、裏で取得して差し替える（場所切り替え時も同じ）
         if (!state.data){ $("loading").classList.add("show"); }
         $("error").classList.remove("show");
-        var jobs = MODELS.map(function(m){ return fetchModel(m, place.lat, place.lon); });
-        Promise.all(jobs).then(function(results){
-          var merged = merge(results);
-          if (merged){ finishLoad(place, merged); return; }
-          if (!attempt){
-            // 全モデル失敗時は3秒待って自動で1回だけ取り直す
-            setTimeout(function(){ state.loading=false; load(place, 1); }, 3000);
-            return;
-          }
-          var modelKeys = results.map(function(r){ return r.model.key; });
-          // 予備経路1：モデル指定なしの単一リクエストなら通る場合があるため、それでも取得を試みる
-          fetchModel({ key:"best", label:"標準モデル", model:null }, place.lat, place.lon).then(function(fr){
+        var results = new Array(MODELS.length);
+        var settled = 0;
+        var firstRendered = false;
+        var fallbackStarted = false;
+        var finished = false;
+        function primaryKeys(){
+          return results.filter(Boolean).map(function(r){ return r.model.key; });
+        }
+        function maybeFallback(){
+          if (finished || fallbackStarted || firstRendered) return;
+          if (seq !== loadSeq) return;
+          fallbackStarted = true;
+          var modelKeys = primaryKeys();
+          // 予備経路は主要モデルが上限時間内に1つも来なかった場合だけ使う
+          fetchModel({ key:"best", label:"標準モデル", model:null }, place.lat, place.lon, { timeoutMs:6000, maxRetry:0 }).then(function(fr){
+            if (seq !== loadSeq || finished || firstRendered) return;
             var fm = merge([fr]);
-            if (fm){ fm.errors = modelKeys; finishLoad(place, fm); return; }
-            // 予備経路2：別ホスト wttr.in（Open-Meteoのホスト自体が遮断されている場合の回避）
+            if (fm){ fm.errors = modelKeys; finished = true; finishLoad(place, fm); return; }
             fetchWttr(place.lat, place.lon).then(function(w){
+              if (seq !== loadSeq || finished || firstRendered) return;
               w.errors = modelKeys.concat(["best"]);
-              finishLoad(place, w);
+              finished = true; finishLoad(place, w);
             }, function(werr){
-              // 予備経路3：別ホスト MET Norway
+              if (seq !== loadSeq || finished || firstRendered) return;
               fetchMet(place.lat, place.lon).then(function(mt){
+                if (seq !== loadSeq || finished || firstRendered) return;
                 mt.errors = modelKeys.concat(["best"]);
-                finishLoad(place, mt);
+                finished = true; finishLoad(place, mt);
               }, function(merr){
+                if (seq !== loadSeq || finished) return;
+                finished = true;
                 state.loading = false;
                 $("refresh").classList.remove("spinning");
                 $("loading").classList.remove("show");
                 $("content").classList.remove("show");
                 $("error").classList.add("show");
-                var lines = results.map(function(r){ return r.model.key+": "+(r.error||"失敗"); });
+                var lines = results.filter(Boolean).map(function(r){ return r.model.key+": "+(r.error||"失敗"); });
+                if (!lines.length) lines = modelKeys.map(function(k){ return k+": タイムアウト（10秒）"; });
                 lines.push("best: "+(fr.error||"失敗"));
                 lines.push("wttr: "+String(werr && werr.message || werr));
                 lines.push("met: "+String(merr && merr.message || merr));
@@ -1019,6 +1039,40 @@
                 diag.classList.add("show");
               });
             });
+          });
+        }
+        var fallbackTimer = setTimeout(maybeFallback, FALLBACK_AFTER_MS);
+        MODELS.forEach(function(m, idx){
+          fetchModel(m, place.lat, place.lon).then(function(r){
+            if (seq !== loadSeq || finished) return;
+            results[idx] = r;
+            settled++;
+            if (r.ok && !firstRendered){
+              firstRendered = true;
+              clearTimeout(fallbackTimer);
+              // 最初に成功したモデルで即描画する（全モデルを待たない）
+              var single = merge([r]);
+              if (single){
+                applyData(place, single);
+                $("refresh").classList.remove("spinning");
+              }
+            }
+            if (settled === MODELS.length){
+              clearTimeout(fallbackTimer);
+              if (finished) return;
+              var merged = merge(results);
+              if (merged){
+                finished = true;
+                // 残りが揃ったら統合結果で静かに差し替える
+                finishLoad(place, merged);
+              } else if (!firstRendered){
+                maybeFallback();
+              } else {
+                finished = true;
+                state.loading = false;
+                $("refresh").classList.remove("spinning");
+              }
+            }
           });
         });
       }
@@ -1259,7 +1313,7 @@
         savePlaces();
         if (state.place.id !== "gps" && state.place.name === p.name){
           var next = places[0];
-          state.place = next; state.data = null;
+          state.place = next;
           saveLast(next);
           buildChips(); load(next, 0);
           return;
@@ -1284,13 +1338,13 @@
               .then(function(j){
                 var nm = j.city || j.locality || "";
                 if (nm) place.name = "現在地（"+nm+"）";
-                state.place = place; state.data = null; saveLast(place); buildChips(); load(place, 0);
+                state.place = place; saveLast(place); buildChips(); load(place, 0);
               })
-              .catch(function(){ state.place = place; state.data = null; saveLast(place); buildChips(); load(place, 0); });
+              .catch(function(){ state.place = place; saveLast(place); buildChips(); load(place, 0); });
           }, function(){ alertGpsFail(); }, { timeout:10000, maximumAge:600000 });
           return;
         }
-        state.place = p; state.data = null;
+        state.place = p;
         saveLast(p);
         buildChips(); load(p, 0);
       }
@@ -1420,7 +1474,7 @@
       });
 
       /* ---------- refresh ---------- */
-      function refresh(){ if (state.place && state.place.lat !== undefined){ state.data = state.data; load(state.place, 0); } }
+      function refresh(){ if (state.place && state.place.lat !== undefined){ load(state.place, 0); } }
       $("refresh").addEventListener("click", refresh);
       $("retry").addEventListener("click", function(){ $("error").querySelector(".msg").textContent = "天気を取得できませんでした"; refresh(); });
       /* pull to refresh */
