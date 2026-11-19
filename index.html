@@ -158,6 +158,26 @@
       .hilo{margin-top:10px;font-size:16px;color:var(--ink-dim);display:flex;gap:16px;flex-wrap:wrap}
       .hilo b{color:var(--ink)}
       .hilo .hi b{color:#ff9d7a}.hilo .lo b{color:#8fc6ff}
+      /* 前日比バッジ（ヒーロー内・週間共通） */
+      .diff{font-size:12px;font-weight:800;line-height:1;padding:3px 7px;border-radius:999px;background:rgba(255,255,255,.10);color:var(--ink-dim);white-space:nowrap;font-variant-numeric:tabular-nums}
+      .diff.up{color:#ffb08a;background:rgba(255,122,77,.18)}
+      .diff.down{color:#9ecfff;background:rgba(95,168,255,.18)}
+      .diff.flat{color:var(--ink-dim);background:rgba(255,255,255,.08)}
+      .wdiff{font-size:11px;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums;margin-left:2px}
+      .wdiff.up{color:#ff9d7a}.wdiff.down{color:#8fc6ff}.wdiff.flat{color:var(--ink-faint)}
+      /* 昨日と比べて（前日比ストリップ） */
+      .ycompare{margin-top:12px;background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:var(--radius-tile);padding:12px}
+      .ycompare[hidden]{display:none}
+      .yc-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+      .yc-title{font-size:13.5px;font-weight:900;color:var(--ink)}
+      .yc-yday{font-size:12.5px;color:var(--ink-faint)}
+      .yc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:9px}
+      .yc-item{background:rgba(0,0,0,.24);border-radius:10px;padding:8px 4px 7px;text-align:center;min-width:0}
+      .yc-item .yc-k{display:block;font-size:11.5px;color:var(--ink-faint);font-weight:700}
+      .yc-item .yc-v{display:block;font-size:18px;font-weight:900;margin-top:2px;line-height:1.25}
+      .yc-item .yc-v .diff{vertical-align:2px;margin-left:2px}
+      .yc-item .yc-sub{display:block;font-size:11px;color:var(--ink-faint);margin-top:1px;white-space:nowrap}
+      .yc-note{font-size:13.5px;line-height:1.6;color:var(--ink);opacity:.94;margin-top:9px}
       /* pressure badge — ひと目で危険度が分かる表示 */
       .pressure{margin-top:14px;display:flex;gap:10px;align-items:flex-start;background:rgba(0,0,0,.30);
         border:1px solid var(--line);border-radius:var(--radius-tile);padding:12px 12px}
@@ -387,10 +407,19 @@
               </div>
             </div>
             <div class="hilo">
-              <span class="hi">最高 <b id="himax">--°</b></span>
-              <span class="lo">最低 <b id="lomin">--°</b></span>
+              <span class="hi">最高 <b id="himax">--°</b> <span class="diff flat" id="himax-diff" hidden>±0°</span></span>
+              <span class="lo">最低 <b id="lomin">--°</b> <span class="diff flat" id="lomin-diff" hidden>±0°</span></span>
               <span>湿度 <b id="hum">--%</b></span>
               <span>風 <b id="wind">--</b></span>
+            </div>
+            <div class="ycompare" id="ycompare" hidden>
+              <div class="yc-head"><span class="yc-title">昨日と比べて</span><span class="yc-yday" id="yc-yday">昨日の実績 —</span></div>
+              <div class="yc-grid">
+                <div class="yc-item"><span class="yc-k">いまの気温</span><span class="yc-v"><span id="yc-now-val">--°</span><span class="diff flat" id="yc-now-diff">—</span></span><span class="yc-sub" id="yc-now-sub">昨日同時刻 —</span></div>
+                <div class="yc-item"><span class="yc-k">最高気温</span><span class="yc-v"><span id="yc-hi-val">--°</span><span class="diff flat" id="yc-hi-diff">—</span></span><span class="yc-sub" id="yc-hi-sub">昨日 —</span></div>
+                <div class="yc-item"><span class="yc-k">最低気温</span><span class="yc-v"><span id="yc-lo-val">--°</span><span class="diff flat" id="yc-lo-diff">—</span></span><span class="yc-sub" id="yc-lo-sub">昨日 —</span></div>
+              </div>
+              <div class="yc-note" id="yc-note"></div>
             </div>
             <div class="pressure" id="pressurecard" data-level="normal">
               <span class="pdot" id="pdot"></span>
@@ -438,10 +467,11 @@
        </div><!-- /view-hourly -->
 
        <div class="view" id="view-weekly" data-view="weekly">
-        <div class="view-head"><h2>週間予報</h2><p>7日間の天気と気温の幅、降水確率です。今日だけは「今から今日が終わるまで」の最大値を表示します（深夜〜早朝に過ぎた雨は含みません）。</p></div>
+        <div class="view-head"><h2>週間予報</h2><p>7日間の天気と気温の幅、降水確率です。各日の気温の横には前日との差（前日比）を表示します。今日だけは「今から今日が終わるまで」の最大値を表示します（深夜〜早朝に過ぎた雨は含みません）。</p></div>
         <section>
           <h2>週間予報</h2>
           <div class="card"><div id="drows"></div></div>
+          <p class="modelnote">気温の横の小さな数字は前日との差（今日は昨日との差）</p>
           <p class="modelnote">※ 今日の降水確率は現在時刻以降の残りの時間帯での最大値です。明日以降は1日全体の最大値です。</p>
         </section>
        </div><!-- /view-weekly -->
@@ -457,6 +487,7 @@
             <div class="det"><div class="k">体感温度</div><div class="v"><span id="d-feels">--</span><small>°</small></div><div class="s" id="d-feels-s">—</div></div>
             <div class="det"><div class="k">日の出</div><div class="v" id="d-sunrise">--:--</div><div class="s">日の入り <span id="d-sunset">--:--</span></div></div>
             <div class="det"><div class="k">今日の降水確率（これから）</div><div class="v"><span id="d-pop">--</span> <small>%</small></div><div class="s" id="d-pop-s">—</div></div>
+            <div class="det" id="d-diff-card" style="grid-column:1 / -1"><div class="k">昨日との差（前日比）</div><div class="v" id="d-diff" style="font-size:20px;line-height:1.4">—</div><div class="s" id="d-diff-s">—</div></div>
           </div>
         </section>
 
@@ -645,6 +676,45 @@
         var dirs = ["北","北北東","北東","東北東","東","東南東","南東","南南東","南","南南西","南西","西南西","西","西北西","北西","北北西"];
         return dirs[Math.round(deg/22.5)%16];
       }
+      /* ---------- 前日比（昨日との気温差） ----------
+         差は「表示値（整数に丸めた最高・最低）同士の引き算」で出す。
+         生の小数同士を引いてから丸めると、画面に並ぶ数字と差が合わなくなるため。 */
+      function diffOf(cur, prev){
+        if (cur === null || cur === undefined || prev === null || prev === undefined || isNaN(cur) || isNaN(prev)) return null;
+        var curR = Number(cur.toFixed(0)), prevR = Number(prev.toFixed(0));
+        var r = curR - prevR;
+        return { raw:cur - prev, rounded:r, cls: r > 0 ? "up" : (r < 0 ? "down" : "flat"),
+          text: (r > 0 ? "+" + r : (r < 0 ? String(r) : "±0")) + "°",
+          arrow: r > 0 ? "↑" : (r < 0 ? "↓" : "→"),
+          word: r >= 2 ? "高く" : (r === 1 ? "少し高く" : (r <= -2 ? "低く" : (r === -1 ? "少し低く" : "ほぼ同じで"))) };
+      }
+      function setDiffEl(el, d, prefix){
+        if (!el) return;
+        if (!d){ el.hidden = true; el.textContent = ""; return; }
+        el.hidden = false;
+        el.textContent = (prefix || "") + d.text;
+        el.className = el.className.replace(/\b(up|down|flat)\b/g, "").trim() + " " + d.cls;
+        // diff / wdiff の基底クラスを保つ
+        if (el.className.indexOf("diff") < 0 && el.className.indexOf("wdiff") < 0) el.className = "diff " + d.cls;
+      }
+      function diffSentence(hiD, loD){
+        if (!hiD && !loD) return "";
+        if (hiD && loD){
+          if (hiD.rounded === 0 && loD.rounded === 0) return "昨日と気温はほぼ変わりません。服装も昨日と同じ感じで大丈夫です。";
+          var parts = [];
+          parts.push("最高は昨日より " + hiD.text.replace("°","度") + (hiD.rounded > 0 ? " 高く" : (hiD.rounded < 0 ? " 低く" : "")));
+          parts.push("最低は " + loD.text.replace("°","度") + (loD.rounded > 0 ? " 高く" : (loD.rounded < 0 ? " 低く" : "")));
+          var tail = "";
+          if (hiD.rounded >= 2) tail = "昨日より暖かく感じそうです。";
+          else if (hiD.rounded <= -2) tail = "昨日より寒く感じそうです。一枚多めがおすすめです。";
+          else if (hiD.rounded === 1) tail = "昨日より少し暖かめです。";
+          else if (hiD.rounded === -1) tail = "昨日より少し寒めです。";
+          else tail = "日中の気温は昨日並みです。";
+          return parts.join("、") + "なります。" + tail;
+        }
+        var d = hiD || loD;
+        return "昨日より " + d.text.replace("°","度") + (d.rounded > 0 ? " 高く" : (d.rounded < 0 ? " 低く" : "")) + "なります。";
+      }
 
       /* ---------- time-of-day background ---------- */
       function applyTimeOfDay(){
@@ -724,7 +794,7 @@
           "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,pressure_msl,wind_speed_10m,wind_direction_10m,is_day"+
           "&hourly=temperature_2m,weather_code,precipitation_probability,pressure_msl"+
           "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset"+
-          "&timezone=Asia%2FTokyo&forecast_days=7&wind_speed_unit=ms" + (m.model ? "&models="+m.model : "");
+          "&timezone=Asia%2FTokyo&forecast_days=7&past_days=1&wind_speed_unit=ms" + (m.model ? "&models="+m.model : "");
         var url = "https://api.open-meteo.com/v1/forecast?"+params;
         function tryOnce(n){
           var ctrl = new AbortController();
@@ -796,7 +866,33 @@
             sunrise: first.daily.sunrise[d], sunset: first.daily.sunset[d]
           });
         }
-        return { current:cur, hours:hours, days:days,
+        /* 前日比用：past_days=1 で先頭に入る「昨日」を分離し、予報は今日から7日だけ残す */
+        var todayDateStr = (cur.time || "").slice(0,10);
+        var todayIdx = -1;
+        for (var di=0; di<days.length; di++){ if (days[di].date === todayDateStr){ todayIdx = di; break; } }
+        var yesterday = null;
+        var yesterdaySameTemp = null;
+        if (todayIdx > 0){
+          yesterday = days[todayIdx - 1];
+          days = days.slice(todayIdx, todayIdx + 7);
+          // 昨日同時刻の気温：現在時刻の「日付-1日・同じ時」の時間別データを探す
+          if (cur.time && yesterday){
+            var yTarget = yesterday.date + cur.time.slice(10);
+            var yHourTarget = yesterday.date + "T" + cur.time.slice(11,13) + ":00";
+            for (var hi2=0; hi2<hours.length; hi2++){
+              if (hours[hi2].time === yTarget || hours[hi2].time === yHourTarget){ yesterdaySameTemp = hours[hi2].temp; break; }
+            }
+            if (yesterdaySameTemp === null){
+              // 分まで一致しない場合は昨日の同じ「時」の行を使う
+              for (var hi3=0; hi3<hours.length; hi3++){
+                if (hours[hi3].time.slice(0,13) === yHourTarget.slice(0,13)){ yesterdaySameTemp = hours[hi3].temp; break; }
+              }
+            }
+          }
+        } else if (todayIdx === 0){
+          days = days.slice(0, 7);
+        }
+        return { current:cur, hours:hours, days:days, yesterday:yesterday, yesterdaySameTemp:yesterdaySameTemp,
           okLabels: ok.map(function(r){ return r.model.label; }),
           errors: results.filter(function(r){ return !r.ok; }).map(function(r){ return r.model.key+": "+r.error; }) };
       }
@@ -907,7 +1003,7 @@
               pop: pops.length ? Math.max.apply(null, pops) : null,
               sunrise: toISO(ast.sunrise), sunset: toISO(ast.sunset) };
           });
-          return { current:cur, hours:expandHours(pts, nowKey), days:days, okLabels:["予備データ（wttr.in）"], errors:[] };
+          return { current:cur, hours:expandHours(pts, nowKey), days:days, yesterday:null, yesterdaySameTemp:null, okLabels:["予備データ（wttr.in）"], errors:[] };
         });
       }
       /* MET Norway（ノルウェー気象局）: symbol_code→WMOコード近似変換 */
@@ -965,7 +1061,7 @@
               pop:null, sunrise:null, sunset:null };
           });
           return { current:cur, hours:expandHours(entries.map(function(e){ return { key:e.key, temp:e.temp, code:e.code, pop:null }; }), nowKey),
-            days:days, okLabels:["予備データ（MET Norway）"], errors:[] };
+            days:days, yesterday:null, yesterdaySameTemp:null, okLabels:["予備データ（MET Norway）"], errors:[] };
         });
       }
 
@@ -1096,6 +1192,32 @@
         var today = data.days[0];
         $("himax").textContent = fmt(today.max) + "°";
         $("lomin").textContent = fmt(today.min) + "°";
+        /* 前日比：最高・最低の差をヒーローにもバッジで出す */
+        var yday = data.yesterday || null;
+        var hiDiff = yday ? diffOf(today.max, yday.max) : null;
+        var loDiff = yday ? diffOf(today.min, yday.min) : null;
+        var nowDiff = (yday && data.yesterdaySameTemp !== null && data.yesterdaySameTemp !== undefined) ? diffOf(c.temp, data.yesterdaySameTemp) : null;
+        setDiffEl($("himax-diff"), hiDiff, "昨日比");
+        setDiffEl($("lomin-diff"), loDiff, "昨日比");
+        (function(){
+          var box = $("ycompare");
+          if (!box) return;
+          if (!yday || (!hiDiff && !loDiff && !nowDiff)){ box.hidden = true; return; }
+          box.hidden = false;
+          var yDt = new Date(yday.date + "T00:00:00");
+          var yw = ["日","月","火","水","木","金","土"][yDt.getDay()];
+          $("yc-yday").textContent = "昨日 " + (yDt.getMonth()+1) + "/" + yDt.getDate() + "（" + yw + "）最高 " + fmt(yday.max) + "° / 最低 " + fmt(yday.min) + "°";
+          $("yc-now-val").textContent = fmt(c.temp) + "°";
+          setDiffEl($("yc-now-diff"), nowDiff);
+          $("yc-now-sub").textContent = nowDiff ? ("昨日同時刻 " + fmt(data.yesterdaySameTemp) + "°") : "昨日同時刻 —";
+          $("yc-hi-val").textContent = fmt(today.max) + "°";
+          setDiffEl($("yc-hi-diff"), hiDiff);
+          $("yc-hi-sub").textContent = "昨日 " + fmt(yday.max) + "°";
+          $("yc-lo-val").textContent = fmt(today.min) + "°";
+          setDiffEl($("yc-lo-diff"), loDiff);
+          $("yc-lo-sub").textContent = "昨日 " + fmt(yday.min) + "°";
+          $("yc-note").textContent = diffSentence(hiDiff, loDiff);
+        })();
         $("hum").textContent = fmt(c.hum) + "%";
         $("wind").textContent = fmt(c.wind,1) + " m/s";
         /* pressure — 危険度バッジ＋色＋変化の向きまで出す */
@@ -1172,7 +1294,16 @@
         var trendEl = $("ptrend");
         if (trend){ trendEl.textContent = trend.text; trendEl.className = "ptrend show " + trend.cls; }
         else { trendEl.textContent = ""; trendEl.className = "ptrend"; }
-        /* 24 hours */
+        /* 24 hours — 各時間に前日同時刻との差（前日比）も添える */
+        var hourMap = {};
+        data.hours.forEach(function(hh0){ if (hh0.time) hourMap[hh0.time.slice(0,13)] = hh0.temp; });
+        function prevDayTemp(t){
+          if (!t) return null;
+          var d = new Date(t.slice(0,10) + "T00:00:00");
+          d.setDate(d.getDate() - 1);
+          var key = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + "T" + t.slice(11,13);
+          return (key in hourMap) ? hourMap[key] : null;
+        }
         var temps = data.hours.slice(startIdx, startIdx+24).map(function(h){ return h.temp; });
         var tmin = Math.min.apply(null, temps), tmax = Math.max.apply(null, temps);
         var rows = "";
@@ -1181,9 +1312,11 @@
           var hii = wxInfo(hh.code, isDayHour(hh.time));
           var left = tmax===tmin ? 0 : ((hh.temp - tmin)/(tmax-tmin))*70;
           var width = tmax===tmin ? 30 : 18 + ((hh.temp - tmin)/(tmax-tmin))*12;
+          var hDiff = diffOf(hh.temp, prevDayTemp(hh.time));
+          var hDiffHtml = hDiff ? '<span class="wdiff ' + hDiff.cls + '" title="前日同時刻との差">' + hDiff.text + '</span>' : '';
           rows += '<div class="hrow"><span class="ht">'+hourLabel(hh.time)+'</span>'+iconSVG(hii.icon)+
             '<span class="bar"><i style="left:'+left+'%;width:'+Math.max(width,14)+'%"></i></span>'+
-            '<span class="hv"><b>'+fmt(hh.temp)+'°</b><span class="pop">'+(hh.pop===null?"—":Math.round(hh.pop)+"%")+'</span></span></div>';
+            '<span class="hv"><b>'+fmt(hh.temp)+'°</b>' + hDiffHtml + '<span class="pop">'+(hh.pop===null?"—":Math.round(hh.pop)+"%")+'</span></span></div>';
         }
         $("hrows").innerHTML = rows;
         /* daily */
@@ -1197,10 +1330,15 @@
           var di = wxInfo(d.code, true);
           var l = allMax===allMin ? 0 : ((d.min-allMin)/(allMax-allMin))*100;
           var w = allMax===allMin ? 40 : Math.max(((d.max-d.min)/(allMax-allMin))*100, 12);
+          var prevDay = idx===0 ? yday : data.days[idx-1];
+          var dHi = prevDay ? diffOf(d.max, prevDay.max) : null;
+          var dLo = prevDay ? diffOf(d.min, prevDay.min) : null;
+          var dHiHtml = dHi ? '<span class="wdiff ' + dHi.cls + '" title="最高の前日比">' + dHi.text + '</span>' : '';
+          var dLoHtml = dLo ? '<span class="wdiff ' + dLo.cls + '" title="最低の前日比">' + dLo.text + '</span>' : '';
           dhtml += '<div class="drow"><div class="dd">'+label+'<small>'+(dt.getMonth()+1)+"/"+dt.getDate()+"（"+wdays[dt.getDay()]+"）</small></div>"+
             iconSVG(di.icon)+
             (idx===0 && todayFuturePop !== null && todayFuturePop !== undefined ? '<span class="pop">'+Math.round(todayFuturePop)+'%<small>これから</small></span>' : '<span class="pop">'+(d.pop===null?"—":Math.round(d.pop)+"%")+'</span>')+
-            '<span class="range"><span class="lo">'+fmt(d.min)+'°</span><span class="bar"><i style="left:'+l+'%;width:'+w+'%"></i></span><span class="hi">'+fmt(d.max)+'°</span></span></div>';
+            '<span class="range"><span class="lo">'+fmt(d.min)+'°'+dLoHtml+'</span><span class="bar"><i style="left:'+l+'%;width:'+w+'%"></i></span><span class="hi">'+fmt(d.max)+'°'+dHiHtml+'</span></span></div>';
         });
         $("drows").innerHTML = dhtml;
         /* details */
@@ -1215,6 +1353,18 @@
         $("d-sunrise").textContent = today.sunrise ? today.sunrise.slice(11,16) : "--:--";
         $("d-sunset").textContent = today.sunset ? today.sunset.slice(11,16) : "--:--";
         $("d-pop").textContent = (todayFuturePop===null || todayFuturePop===undefined) ? "--" : Math.round(todayFuturePop);
+        (function(){
+          var card = $("d-diff-card"), main = $("d-diff"), sub = $("d-diff-s");
+          /* 予備経路（wttr.in / MET Norway）には昨日の値がないため、前日比は出さない（空白＝カードごと隠す。推測の数字は出さない） */
+          if (!yday || (!hiDiff && !loDiff && !nowDiff)){ if (card) card.style.display = "none"; main.textContent = ""; sub.textContent = ""; return; }
+          if (card) card.style.display = "";
+          var bits = [];
+          if (nowDiff) bits.push("いま " + nowDiff.text);
+          if (hiDiff) bits.push("最高 " + hiDiff.text);
+          if (loDiff) bits.push("最低 " + loDiff.text);
+          main.textContent = bits.join(" ／ ");
+          sub.textContent = "昨日は最高 " + fmt(yday.max) + "°・最低 " + fmt(yday.min) + "°、今日は最高 " + fmt(today.max) + "°・最低 " + fmt(today.min) + "°です。" + diffSentence(hiDiff, loDiff) + (nowDiff ? " いまの気温は昨日同時刻（" + fmt(data.yesterdaySameTemp) + "°）と比べて " + nowDiff.text + " です。" : "");
+        })();
         (function(){
           var fut = todayFuturePop, daily = popSplit.dailyPop, past = popSplit.pastMax;
           var range = rainHourRange(popSplit.pastRainHours);
