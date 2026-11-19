@@ -828,7 +828,40 @@
         vals.forEach(function(v){ if (v===null||v===undefined) return; counts[v]=(counts[v]||0)+1; if (counts[v]>bn){ bn=counts[v]; best=v; } });
         return best;
       }
-      function merge(results){
+      /* ---------- 昨日の実績（Open-Meteo archive API / ERA5） ----------
+         前日比の「昨日」側は、モデルの再計算値ではなく観測に近い実績値で比べる。
+         テレビの前日比と同じ感覚にするため（2026-11-19の桜新町：モデル平均の
+         昨日最高は18.8°で今日との差が±0になったが、実績は18.4°で+1°が正しい）。
+         ERA5は翌日にならないと入らないことがあるので、取れなければ null を返し、
+         呼び出し側は従来どおりモデル平均の昨日値で比べる。 */
+      function fetchObservedYesterday(lat, lon){
+        var d = new Date(Date.now() + (9*60 + new Date().getTimezoneOffset())*60000);
+        d.setDate(d.getDate() - 1);
+        var y = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+        var url = "https://archive-api.open-meteo.com/v1/archive?latitude="+lat+"&longitude="+lon+
+          "&start_date="+y+"&end_date="+y+"&daily=temperature_2m_max,temperature_2m_min&hourly=temperature_2m&timezone=Asia%2FTokyo";
+        var ctrl = new AbortController();
+        var timer = setTimeout(function(){ ctrl.abort(); }, 6000);
+        return fetch(url, { signal: ctrl.signal, cache:"no-store" })
+          .then(function(res){ clearTimeout(timer); if (!res.ok) throw new Error("HTTP "+res.status); return res.json(); })
+          .then(function(json){
+            if (!json.daily || !json.daily.time || json.daily.time[0] !== y) return null;
+            var max = json.daily.temperature_2m_max ? json.daily.temperature_2m_max[0] : null;
+            var min = json.daily.temperature_2m_min ? json.daily.temperature_2m_min[0] : null;
+            if (max === null || max === undefined || min === null || min === undefined) return null;
+            var hourly = {};
+            if (json.hourly && json.hourly.time){
+              for (var i=0;i<json.hourly.time.length;i++){
+                var t = json.hourly.time[i];
+                if (t && json.hourly.temperature_2m[i] !== null && json.hourly.temperature_2m[i] !== undefined)
+                  hourly[t.slice(0,13)] = json.hourly.temperature_2m[i];
+              }
+            }
+            return { date:y, max:max, min:min, hourly:hourly };
+          })
+          .catch(function(){ clearTimeout(timer); return null; });
+      }
+      function merge(results, observed){
         var ok = results.filter(function(r){ return r.ok; });
         if (!ok.length) return null;
         var first = ok[0].json;
@@ -866,7 +899,9 @@
             sunrise: first.daily.sunrise[d], sunset: first.daily.sunset[d]
           });
         }
-        /* 前日比用：past_days=1 で先頭に入る「昨日」を分離し、予報は今日から7日だけ残す */
+        /* 前日比用：past_days=1 で先頭に入る「昨日」を分離し、予報は今日から7日だけ残す。
+           実績値が取れていれば、昨日の最高・最低と時間別気温を実績で上書きする
+           （この後の「昨日同時刻」や24時間欄の前日比も実績ベースになる）。 */
         var todayDateStr = (cur.time || "").slice(0,10);
         var todayIdx = -1;
         for (var di=0; di<days.length; di++){ if (days[di].date === todayDateStr){ todayIdx = di; break; } }
@@ -874,6 +909,16 @@
         var yesterdaySameTemp = null;
         if (todayIdx > 0){
           yesterday = days[todayIdx - 1];
+          if (observed && observed.date === yesterday.date){
+            yesterday.max = observed.max;
+            yesterday.min = observed.min;
+            yesterday.observed = true;
+            for (var hi0=0; hi0<hours.length; hi0++){
+              var hk = hours[hi0].time.slice(0,13);
+              if (hours[hi0].time.slice(0,10) === yesterday.date && observed.hourly && (hk in observed.hourly))
+                hours[hi0].temp = observed.hourly[hk];
+            }
+          }
           days = days.slice(todayIdx, todayIdx + 7);
           // 昨日同時刻の気温：現在時刻の「日付-1日・同じ時」の時間別データを探す
           if (cur.time && yesterday){
@@ -1103,7 +1148,8 @@
           // 予備経路は主要モデルが上限時間内に1つも来なかった場合だけ使う
           fetchModel({ key:"best", label:"標準モデル", model:null }, place.lat, place.lon, { timeoutMs:6000, maxRetry:0 }).then(function(fr){
             if (seq !== loadSeq || finished || firstRendered) return;
-            var fm = merge([fr]);
+            mergeInputs = [fr];
+            var fm = merge([fr], observedY);
             if (fm){ fm.errors = modelKeys; finished = true; finishLoad(place, fm); return; }
             fetchWttr(place.lat, place.lon).then(function(w){
               if (seq !== loadSeq || finished || firstRendered) return;
@@ -1138,6 +1184,17 @@
           });
         }
         var fallbackTimer = setTimeout(maybeFallback, FALLBACK_AFTER_MS);
+        /* 昨日の実績を並行取得。届いた時点で、既に描画済みの内容があれば
+           実績ベースの前日比に差し替え、まだなら以降の merge に渡す。 */
+        var observedY = null;
+        var mergeInputs = [];
+        fetchObservedYesterday(place.lat, place.lon).then(function(o){
+          if (seq !== loadSeq || !o) return;
+          observedY = o;
+          if (!mergeInputs.length) return;
+          var m2 = merge(mergeInputs, observedY);
+          if (m2) applyData(place, m2);
+        });
         MODELS.forEach(function(m, idx){
           fetchModel(m, place.lat, place.lon).then(function(r){
             if (seq !== loadSeq || finished) return;
@@ -1147,7 +1204,8 @@
               firstRendered = true;
               clearTimeout(fallbackTimer);
               // 最初に成功したモデルで即描画する（全モデルを待たない）
-              var single = merge([r]);
+              mergeInputs = [r];
+              var single = merge([r], observedY);
               if (single){
                 applyData(place, single);
                 $("refresh").classList.remove("spinning");
@@ -1156,7 +1214,8 @@
             if (settled === MODELS.length){
               clearTimeout(fallbackTimer);
               if (finished) return;
-              var merged = merge(results);
+              mergeInputs = results;
+              var merged = merge(results, observedY);
               if (merged){
                 finished = true;
                 // 残りが揃ったら統合結果で静かに差し替える
